@@ -16,7 +16,7 @@ pip install python-dotenv
 This project provides a simplified wrapper. See `videogen.py` for examples:
 
 ```python
-from seedance_provider import generate_video
+from seedance_provider import generate_video, extend_video
 
 # Text-to-video
 result = generate_video(
@@ -30,6 +30,14 @@ result = generate_video(
     prompt="A gentle breeze moves through the scene",
     reference_image_url="https://your-image-url.com/image.png",
     duration=5,
+)
+
+# Video extension (续写/延长视频)
+result = extend_video(
+    video_url="https://your-server.com/input_clip.mp4",
+    prompt="The camera pulls back to reveal a futuristic city skyline",
+    duration=5,  # 延长时长 (5 or 10 seconds)
+    generate_audio=True,  # 同时生成/延续音效
 )
 ```
 

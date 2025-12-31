@@ -1,72 +1,96 @@
 import os
 from dotenv import load_dotenv
-import vertexai
-from vertexai.generative_models import GenerativeModel, Part, Image
+from google import genai
+from google.genai.types import GenerateContentConfig
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Initialize Vertex AI
+# Initialize Vertex AI client
 _project_id = os.getenv("VERTEX_PROJECT_ID")
-_location = os.getenv("VERTEX_LOCATION")
+_location = os.getenv("VERTEX_LOCATION", "global")
 
-vertexai.init(project=_project_id, location=_location)
+# Override to global for Gemini 3 models (required)
+_location = "global"
 
-# Latest Gemini 3 Pro model
+_client = genai.Client(
+    vertexai=True,
+    project=_project_id,
+    location=_location,
+)
+
+# Gemini 3 Pro model
 DEFAULT_MODEL = "gemini-3-pro-preview"
 
 
 def generate_text(
     prompt: str,
-    image_url: str = None,
     image_path: str = None,
+    image_url: str = None,
     image_bytes: bytes = None,
     model: str = DEFAULT_MODEL,
     max_output_tokens: int = 8192,
     temperature: float = 1.0,
+    system_instruction: str = None,
 ) -> str:
     """
     Generate text using Vertex AI Gemini model.
     
     Args:
         prompt: Text prompt/question
-        image_url: Optional URL of an image (for vision tasks)
         image_path: Optional local file path of an image
+        image_url: Optional URL of an image (for vision tasks)
         image_bytes: Optional raw image bytes
         model: Model ID to use (default: gemini-3-pro-preview)
         max_output_tokens: Maximum tokens in response (default: 8192)
         temperature: Sampling temperature (default: 1.0)
+        system_instruction: Optional system instruction
     
     Returns:
         str: Generated text response
     
-    Note: Only one of image_url, image_path, or image_bytes should be provided.
+    Note: Only one of image_path, image_url, or image_bytes should be provided.
     """
-    # Initialize the model
-    gemini_model = GenerativeModel(model)
+    from PIL import Image
+    import io
     
     # Build content parts
     content_parts = []
     
     # Add image if provided
-    if image_url:
-        content_parts.append(Part.from_uri(image_url, mime_type=_get_mime_type(image_url)))
-    elif image_path:
-        content_parts.append(Part.from_image(Image.load_from_file(image_path)))
+    if image_path:
+        pil_image = Image.open(image_path)
+        content_parts.append(pil_image)
+    elif image_url:
+        import urllib.request
+        with urllib.request.urlopen(image_url) as response:
+            img_bytes = response.read()
+        pil_image = Image.open(io.BytesIO(img_bytes))
+        content_parts.append(pil_image)
     elif image_bytes:
-        content_parts.append(Part.from_data(image_bytes, mime_type="image/jpeg"))
+        pil_image = Image.open(io.BytesIO(image_bytes))
+        content_parts.append(pil_image)
     
     # Add text prompt
     content_parts.append(prompt)
     
+    # Build config
+    config = {
+        "max_output_tokens": max_output_tokens,
+        "temperature": temperature,
+    }
+    if system_instruction:
+        config["system_instruction"] = system_instruction
+    
     # Generate response
-    response = gemini_model.generate_content(
-        content_parts,
-        generation_config={
-            "max_output_tokens": max_output_tokens,
-            "temperature": temperature,
-        }
+    response = _client.models.generate_content(
+        model=model,
+        contents=content_parts if len(content_parts) > 1 else prompt,
+        config=config,
     )
+    
+    if response is None or not response.text:
+        raise Exception("Empty response from Vertex AI")
     
     return response.text
 
@@ -85,18 +109,23 @@ def _get_mime_type(url: str) -> str:
 
 
 # Convenience function for text-only generation
-def chat(prompt: str, model: str = DEFAULT_MODEL) -> str:
+def chat(prompt: str, model: str = DEFAULT_MODEL, system_instruction: str = None) -> str:
     """
     Simple text-to-text generation.
     
     Args:
         prompt: Text prompt/question
         model: Model ID to use
+        system_instruction: Optional system instruction
     
     Returns:
         str: Generated text response
     """
-    return generate_text(prompt=prompt, model=model)
+    return generate_text(
+        prompt=prompt,
+        model=model,
+        system_instruction=system_instruction,
+    )
 
 
 # Convenience function for image analysis
@@ -124,4 +153,3 @@ def analyze_image(
         image_url=image_url,
         model=model,
     )
-
